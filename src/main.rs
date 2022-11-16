@@ -6,6 +6,7 @@ const DB_URL: &str = "sqlite://sqlite.db";
 struct User {
     id: i64,
     name: String,
+    active: bool,
 }
 
 #[tokio::main]
@@ -22,8 +23,23 @@ async fn main() {
 
     let db = SqlitePool::connect(DB_URL).await.unwrap();
 
-    let result = sqlx::query("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY NOT NULL, name VARCHAR(250) NOT NULL);").execute(&db).await.unwrap();
-    println!("Create user table result: {:?}", result);
+    let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let migrations = std::path::Path::new(&crate_dir).join("./migrations");
+
+    let migration_results = sqlx::migrate::Migrator::new(migrations)
+        .await
+        .unwrap()
+        .run(&db)
+        .await;
+
+    match migration_results {
+        Ok(_) => println!("Migration success"),
+        Err(error) => {
+            panic!("error: {}", error);
+        }
+    }
+
+    println!("migration: {:?}", migration_results);
 
     let result = sqlx::query(
         "SELECT name
@@ -39,19 +55,31 @@ async fn main() {
         println!("[{}]: {:?}", idx, row.get::<String, &str>("name"));
     }
 
-    let result = sqlx::query("INSERT INTO users (name) VALUES ('billy')")
+    let result = sqlx::query("INSERT INTO users (name) VALUES (?)")
+        .bind("bobby")
         .execute(&db)
         .await
         .unwrap();
 
     println!("Query result: {:?}", result);
 
-    let user_results = sqlx::query_as::<_, User>("SELECT id, name FROM users")
+    let user_results = sqlx::query_as::<_, User>("SELECT id, name, active FROM users")
         .fetch_all(&db)
         .await
         .unwrap();
 
     for user in user_results {
-        println!("[{}] name: {}", user.id, &user.name);
+        println!(
+            "[{}] name: {}, active: {}",
+            user.id, &user.name, user.active
+        );
     }
+
+    let delete_result = sqlx::query("DELETE FROM users WHERE name=$1")
+        .bind("bobby")
+        .execute(&db)
+        .await
+        .unwrap();
+
+    println!("Delete result: {:?}", delete_result);
 }
